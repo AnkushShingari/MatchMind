@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Colour Match Challenge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    
+    <!-- Using Firebase V8 Namespaced Scripts for stability in a global HTML file -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #0d1117; }
+        /* Custom Shutter Effect */
+        #splash-screen {
+            background: linear-gradient(135deg, #1f2a37, #0d1117);
+            z-index: 100;
+            transition: all 1s ease-in-out;
+        }
+        .shutter {
+            position: absolute;
+            width: 100%;
+            height: 50%;
+            background-color: #0d1117;
+            transform-origin: bottom;
+            transition: transform 1s ease-in-out;
+            z-index: 110;
+        }
+        #shutter-top { top: 0; transform-origin: top; }
+        #shutter-bottom { bottom: 0; transform-origin: bottom; }
+        .shutter-open { transform: scaleY(0); }
+
+        .text-shadow { text-shadow: 0 0 10px rgba(0,0,0,0.5); }
+        .game-card {
+            background-color: #161b22;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        }
+        /* Custom color for visual feedback */
+        .feedback-correct { animation: pulse-green 0.3s ease-out; }
+        .feedback-miss { animation: pulse-red 0.3s ease-out; }
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .color-button {
+            transition: transform 0.1s ease-out, box-shadow 0.1s ease-out;
+        }
+        .color-button:active {
+            transform: scale(0.95);
+            box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.5);
+        }
+
+        /* Toggle Switch Styles */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 3.5rem; /* w-14 */
+            height: 2rem; /* h-8 */
+        }
+        .toggle-checkbox {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #4b5563; /* bg-gray-600 */
+            transition: all 0.3s ease-in-out;
+            border-radius: 9999px; /* rounded-full */
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: '';
+            height: 1.5rem; /* h-6 */
+            width: 1.5rem; /* w-6 */
+            left: 0.25rem; /* left-1 */
+            bottom: 0.25rem; /* bottom-1 */
+            background-color: white;
+            transition: all 0.3s ease-in-out;
+            border-radius: 9999px; /* rounded-full */
+        }
+        .toggle-checkbox:checked + .toggle-slider {
+            background-color: #4f46e5; /* bg-indigo-600 */
+        }
+        .toggle-checkbox:checked + .toggle-slider:before {
+            transform: translateX(1.5rem); /* 1.5rem = 24px */
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <!-- Global App Container -->
+    <div id="app-container" class="w-full max-w-4xl min-h-[600px] game-card rounded-xl p-6 relative flex flex-col items-center">
+
+        <!-- Logo/Auth/Loading Area (Top Left) -->
+        <div id="logo-header" class="absolute top-4 left-4 flex items-center space-x-2 opacity-0 transition-all duration-1000">
+            <svg class="w-6 h-6 text-indigo-400" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clip-rule="evenodd" />
+            </svg>
+            <span class="text-sm font-semibold text-indigo-400">MatchMind</span>
+            <div id="loading-indicator" class="text-sm text-gray-400">Initializing...</div>
+            <div id="auth-status" class="text-xs text-gray-500">User ID: N/A</div>
+        </div>
+
+        <!-- Dynamic Screen Content -->
+        <div id="screen-container" class="w-full flex justify-center mt-16 md:mt-20">
+            <!-- Screens will be dynamically added/shown here -->
+        </div>
+    </div>
+
+    <!-- Splash Screen (Initial Overlay) -->
+    <div id="splash-screen" class="fixed inset-0 flex flex-col items-center justify-center">
+        <!-- Logo during splash -->
+        <div id="splash-logo" class="flex flex-col items-center text-white text-4xl font-black mb-8 transition-all duration-1000">
+            <svg class="w-16 h-16 text-indigo-400 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clip-rule="evenodd" />
+            </svg>
+            <span class="mt-2">MatchMind</span>
+        </div>
+        <!-- Shutters -->
+        <div id="shutter-top" class="shutter"></div>
+        <div id="shutter-bottom" class="shutter"></div>
+    </div>
+
+    <!-- Modals (for How To Play, About, Game Over, Confirmation) -->
+    <div id="modal-container" class="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-sm hidden items-center justify-center z-50">
+        <div id="modal-content" class="bg-gray-800 p-8 rounded-xl shadow-2xl text-white w-full max-w-md m-4">
+            <!-- Content injected here -->
+        </div>
+    </div>
+
+
+    <!-- Main Game Script -->
+    <script>
+        // --- Firebase V8 Setup (Globally Namespaced) ---
+        
+        // V8 uses firebase.firestore.setLogLevel
+        if (typeof firebase !== 'undefined' && typeof firebase.firestore !== 'undefined' && typeof firebase.firestore.setLogLevel === 'function') {
+            firebase.firestore.setLogLevel('debug');
+        } else {
+             console.warn("setLogLevel is not globally available.");
+        }
+
+        // ----------------------------------------------------------------------
+        // --- FIREBASE CONFIGURATION CHECK ---
+        // Checks for Canvas environment variables and falls back to placeholders.
+        // ----------------------------------------------------------------------
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'color-match-app';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        let firebaseConfig = { apiKey: null }; // Default minimum config
+
+        try {
+            if (typeof __firebase_config !== 'undefined') {
+                // Running in the Canvas environment, use injected config
+                firebaseConfig = JSON.parse(__firebase_config);
+            } else {
+                 // Running in a standalone HTML file, use placeholders
+                firebaseConfig = {
+                    apiKey: "AIzaSyAiMQZH8GPgk1KakMFOc0cuE_dCMsfhal4", 
+                    authDomain: "matchmind-25601.firebaseapp.com",
+                    projectId: "matchmind-25601",
+                    storageBucket: "matchmind-25601.firebasestorage.app",
+                    messagingSenderId: "1010119481705",
+                    appId: "1:1010119481705:web:fdc7b902027b06af6585f8"
+                };
+            }
+        } catch(e) {
+            console.error("Failed to parse __firebase_config:", e);
+        }
+        // ----------------------------------------------------------------------
+        // --- END: CONFIG BLOCK ---
+        // ----------------------------------------------------------------------
+
+
+        let db, auth, userId = null;
+        let isAuthReady = false; 
+        
+        let scoreUnsubscribe = null;
+
+        /**
+         * Helper to get the V8 Firestore Document Reference based on V9 path logic.
+         */
+        const USER_STATS_REF = (uid) => {
+            if (!db) return null;
+            // Corresponds to: /artifacts/{appId}/users/{userId}/color_match_stats/game_data
+            return db.collection('artifacts').doc(appId)
+                     .collection('users').doc(uid)
+                     .collection('color_match_stats').doc('game_data');
+        }
+
+        /**
+         * Initializes Firebase and authenticates the user using V8 namespaced methods.
+         */
+        async function initFirebase() {
+            // Check for V8 global object
+            if (typeof firebase === 'undefined' || typeof firebase.initializeApp === 'undefined') {
+                console.error("Firebase functions are not available. Check script tag loading.");
+                userId = crypto.randomUUID();
+                document.getElementById('auth-status').textContent = `Anon ID: ${userId.substring(0, 8)}... (No DB)`;
+                isAuthReady = true;
+                return;
+            }
+
+            // Check if configuration is missing the key. If so, bypass DB initialization.
+            if (!firebaseConfig.apiKey) {
+                 console.warn("Database connection skipped: Firebase API Key is missing. Game runs in memory-only mode (scores will not save).");
+                 document.getElementById('loading-indicator').textContent = 'DB Disabled';
+                 userId = crypto.randomUUID();
+                 document.getElementById('auth-status').textContent = `Anon ID: ${userId.substring(0, 8)}... (No DB)`;
+                 isAuthReady = true;
+                 return; // Exit successfully without failing
+            }
+
+
+            try {
+                // Initialize V8 App
+                const app = firebase.initializeApp(firebaseConfig);
+                auth = app.auth();
+                db = app.firestore();
+                
+                document.getElementById('loading-indicator').textContent = 'Authenticating...';
+
+                // V8 uses onAuthStateChanged from the auth instance
+                await new Promise(resolve => {
+                    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+                        if (user) {
+                            userId = user.uid;
+                            document.getElementById('auth-status').textContent = `User ID: ${userId.substring(0, 8)}...`;
+                        } else if (!userId) {
+                            if (initialAuthToken) {
+                                // V8: auth.signInWithCustomToken() - Use custom token if available
+                                await auth.signInWithCustomToken(initialAuthToken);
+                            } else {
+                                // V8: auth.signInAnonymously() - Fallback for local testing if key is present
+                                await auth.signInAnonymously();
+                            }
+                        }
+                        isAuthReady = true;
+                        resolve();
+                        unsubscribe(); // Stop listening after the initial state is resolved
+                    });
+                });
+            } catch (error) {
+                console.error("Firebase initialization or authentication failed. Check your config/rules:", error);
+                document.getElementById('loading-indicator').textContent = 'Error!';
+                if (!userId) {
+                    userId = crypto.randomUUID();
+                    document.getElementById('auth-status').textContent = `Anon ID: ${userId.substring(0, 8)}... (Error)`;
+                    isAuthReady = true;
+                }
+            }
+        }
+
+        // --- Game Constants and State ---
+
+        const COLOR_MAP = [
+            { name: "White", hex: "#FFFFFF", key: '1' },
+            { name: "Lime", hex: "#00FF00", key: '2' },
+            { name: "Violet", hex: "#EE82EE", key: '3' },
+            { name: "Indigo", hex: "#4B0082", key: '4' },
+            { name: "Blue", hex: "#0000FF", key: '5' },
+            { name: "Green", hex: "#008000", key: '6' },
+            { name: "Yellow", hex: "#FFFF00", key: '7' },
+            { name: "Orange", hex: "#FFA500", key: '8' },
+            { name: "Red", hex: "#FF0000", key: '9' },
+        ];
+
+        let gameState = {
+            screen: 'splash',
+            isSoundOn: true,
+            isMusicOn: true,
+            score: 0,
+            lives: 3,
+            difficultyLevel: 1, // Determines timer delay
+            baseDelay: 2000, // 2 seconds (2000ms)
+            currentDelay: 2000,
+            roundsSinceDifficultyIncrease: 0,
+            currentRound: null, // { name: "Red", hex: "#FF0000" }
+            gameTimer: null, // setInterval handle
+            roundStartTime: 0,
+            reactionTimes: [], // Temp storage for current session
+            userHighScores: {
+                highScore: 0,
+                averageReactionTime: 0
+            },
+            isInputLocked: false, 
+            isRoundResolved: false, 
+        };
+
+        // --- Audio Setup (Tone.js) ---
+
+        const synth = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "square" },
+            envelope: {
+                attack: 0.005,
+                decay: 0.1,
+                sustain: 0.1,
+                release: 0.1
+            }
+        }).toDestination();
+        
+        let guitarPlayers = [];
+        
+        /** Sets up the four synced Tone.js players for background music. */
+        function setupCustomMusic() {
+            const urls = [
+                { name: "Guitar 0", url: "comping1", pan: 1 },
+                { name: "Guitar 1", url: "comping2", pan: -1 },
+                { name: "Guitar 2", url: "comping3", pan: 0.25 },
+                { name: "Guitar 3", url: "comping4", pan: -0.25 },
+            ];
+
+            urls.forEach(({ url, pan }) => {
+                const channel = new Tone.Channel({ pan }).toDestination();
+                channel.volume.value = 0; 
+                
+                const player = new Tone.Player({
+                    url: `https://tonejs.github.io/audio/berklee/${url}.mp3`,
+                    loop: true,
+                    volume: 5, 
+                    onerror: (e) => console.error(`Failed to load player URL: ${url}`, e) 
+                })
+                .sync() 
+                .start(0); 
+                
+                player.connect(channel);
+                guitarPlayers.push(player);
+            });
+        }
+
+        /** Initializes Tone.js properties after initial script load */
+        function initializeToneProperties() {
+            try {
+                synth.volume.value = -10;
+                Tone.Transport.bpm.value = 100;
+                setupCustomMusic(); 
+            } catch(e) {
+                console.warn("Could not set initial Tone.js volumes:", e);
+            }
+        }
+
+        /** Plays a sound effect based on outcome. */
+        function playSound(type) {
+            if (!gameState.isSoundOn) return;
+            if (Tone.context.state !== 'running') {
+                 Tone.start().then(() => playSoundActual(type));
+                 return;
+            }
+            playSoundActual(type);
+        }
+
+        function playSoundActual(type) {
+            switch (type) {
+                case 'correct':
+                    synth.triggerAttackRelease("G5", "16n");
+                    break;
+                case 'fail':
+                    synth.triggerAttackRelease("C3", "8n");
+                    break;
+                case 'gameover':
+                    synth.triggerAttackRelease(["C2", "C#2", "D2"], "4n");
+                    break;
+                case 'click':
+                    synth.triggerAttackRelease("C6", "32n");
+                    break;
+            }
+        }
+
+        /** Toggles background music by starting or stopping the Tone.Transport. */
+        function toggleMusic(forceState = null) {
+            if (forceState !== null) {
+                gameState.isMusicOn = forceState;
+            } else {
+                gameState.isMusicOn = !gameState.isMusicOn;
+            }
+
+            if (gameState.isMusicOn) {
+                if (Tone.context.state !== 'running') {
+                    Tone.start().then(() => Tone.Transport.start());
+                } else {
+                    Tone.Transport.start(); 
+                }
+            } else {
+                Tone.Transport.stop(); 
+            }
+            updateOptionsUI();
+        }
+
+        /** Toggles sound effects. */
+        function toggleSound(forceState = null) {
+            if (forceState !== null) {
+                gameState.isSoundOn = forceState;
+            } else {
+                gameState.isSoundOn = !gameState.isSoundOn;
+            }
+            updateOptionsUI();
+        }
+
+        // --- UI Rendering Functions (omitted for brevity, no changes here) ---
+        const screens = {
+            mainMenu: (
+                `<div class="flex flex-col space-y-4 w-full max-w-sm p-4 text-white">
+                    <h2 class="text-4xl font-bold text-center text-indigo-400 mb-6 text-shadow">MatchMind</h2>
+                    <button class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-xl transition-all duration-300 hover:bg-indigo-700 hover:scale-[1.05] hover:shadow-2xl hover:shadow-indigo-500/50 active:bg-indigo-800 focus:outline-none focus:ring-4 focus:ring-indigo-500" onclick="window.startGame()">New Game</button>
+                    <button class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-xl transition-all duration-300 hover:bg-indigo-700 hover:scale-[1.05] hover:shadow-2xl hover:shadow-indigo-500/50 active:bg-indigo-800 focus:outline-none focus:ring-4 focus:ring-indigo-500" onclick="window.showScreen('options')">Options</button>
+                    <button class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-xl transition-all duration-300 hover:bg-indigo-700 hover:scale-[1.05] hover:shadow-2xl hover:shadow-indigo-500/50 active:bg-indigo-800 focus:outline-none focus:ring-4 focus:ring-indigo-500" onclick="window.showModal('howToPlay')">How To Play</button>
+                    <button class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-xl transition-all duration-300 hover:bg-indigo-700 hover:scale-[1.05] hover:shadow-2xl hover:shadow-indigo-500/50 active:bg-indigo-800 focus:outline-none focus:ring-4 focus:ring-indigo-500" onclick="window.showScreen('highScore')">High Score</button>
+                    <button class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-xl transition-all duration-300 hover:bg-indigo-700 hover:scale-[1.05] hover:shadow-2xl hover:shadow-indigo-500/50 active:bg-indigo-800 focus:outline-none focus:ring-4 focus:ring-indigo-500" onclick="window.showModal('about')">About</button>
+                    <button class="px-4 py-2 bg-gray-700 text-gray-200 rounded-lg transition-all duration-300 hover:bg-gray-600 active:bg-gray-800" onclick="window.simulatedExit()">Exit</button>
+                </div>`
+            ),
+            options: (
+                `<div class="flex flex-col space-y-6 w-full max-w-md p-6 bg-gray-700 rounded-xl">
+                    <h2 class="text-3xl font-bold text-center text-indigo-400 text-shadow">Options</h2>
+                    <!-- Sound Effects Toggle -->
+                    <div class="flex justify-between items-center text-white p-3 bg-gray-800 rounded-lg">
+                        <span class="text-lg">Sound Effects</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="toggle-sound-checkbox" class="toggle-checkbox" onchange="window.toggleSound(this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <!-- Background Music Toggle -->
+                    <div class="flex justify-between items-center text-white p-3 bg-gray-800 rounded-lg">
+                        <span class="text-lg">Background Music</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="toggle-music-checkbox" class="toggle-checkbox" onchange="window.toggleMusic(this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <button class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-xl transition-all duration-300 hover:bg-indigo-700 hover:scale-[1.05] hover:shadow-2xl hover:shadow-indigo-500/50 active:bg-indigo-800 focus:outline-none focus:ring-4 focus:ring-indigo-500 mt-4" onclick="window.showScreen('mainMenu')">Back to Menu</button>
+                </div>`
+            ),
+            highScore: (
+                `<div class="flex flex-col space-y-6 w-full max-w-md p-6 bg-gray-700 rounded-xl text-white">
+                    <h2 class="text-3xl font-bold text-center text-indigo-400 text-shadow">Your High Scores</h2>
+                    <div class="bg-gray-800 p-4 rounded-lg shadow-inner">
+                        <p class="text-2xl font-semibold mb-2">Highest Score:</p>
+                        <p id="high-score-display" class="text-4xl font-extrabold text-lime-400">0</p>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg shadow-inner">
+                        <p class="text-2xl font-semibold mb-2">Avg. Reaction Time:</p>
+                        <p id="avg-reaction-time-display" class="text-4xl font-extrabold text-yellow-400">0 ms</p>
+                        <p class="text-sm text-gray-400 mt-1">Based on all your successful matches.</p>
+                    </div>
+                    <!-- Button now calls resetScores, which triggers the confirmation modal -->
+                    <button class="px-4 py-2 bg-red-600 text-white font-bold rounded-lg transition-all duration-300 hover:bg-red-700 active:bg-red-800" onclick="window.resetScores()">Reset Scores</button>
+                    <button class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-xl transition-all duration-300 hover:bg-indigo-700 hover:scale-[1.05] hover:shadow-2xl hover:shadow-indigo-500/50 active:bg-indigo-800 focus:outline-none focus:ring-4 focus:ring-indigo-500 mt-4" onclick="window.showScreen('mainMenu')">Back to Menu</button>
+                </div>`
+            ),
+            game: (
+                `<div class="w-full flex flex-col items-center">
+                    <div class="w-full flex justify-between items-center mb-6 px-2">
+                        <div class="text-2xl font-bold text-white">Score: <span id="game-score">0</span></div>
+                        <div class="text-2xl font-bold text-white">Lives: <span id="game-lives" class="text-red-400">❤️❤️❤️</span></div>
+                    </div>
+
+                    <!-- Get Colour Window -->
+                    <div id="get-color-window" class="game-card p-6 rounded-xl mb-8 w-64 h-32 flex flex-col items-center justify-center border-4 border-indigo-500">
+                        <p class="text-xl text-gray-300">GET</p>
+                        <p id="target-color-name" class="text-4xl font-black transition-colors duration-100 ease-linear">WAIT</p>
+                    </div>
+
+                    <!-- Colour Buttons -->
+                    <div id="color-buttons-grid" class="grid grid-cols-3 gap-4 w-full max-w-md">
+                        ${COLOR_MAP.map(color => `
+                            <button
+                                class="color-button w-full h-20 md:h-24 rounded-xl border-4 border-gray-600 flex items-center justify-center text-white font-bold text-lg shadow-lg"
+                                style="background-color: ${color.hex}; color: ${isDark(color.hex) ? '#fff' : '#000'};"
+                                data-color="${color.name}"
+                                onclick="window.checkMatch('${color.name}')"
+                            >
+                                ${color.name} <span class="ml-2 opacity-50 text-sm">(${color.key})</span>
+                            </button>
+                        `).join('')}
+                    </div>
+
+                    <p id="feedback-message" class="mt-4 text-xl font-bold h-6 text-center text-white"></p>
+                    <button class="px-4 py-2 bg-gray-700 text-gray-200 rounded-lg transition-all duration-300 hover:bg-gray-600 active:bg-gray-800 mt-6" onclick="window.showScreen('mainMenu'); window.stopGame();">End Game</button>
+                </div>`
+            )
+        };
+
+        /** Checks if a color is dark for text contrast. */
+        function isDark(hex) {
+            const r = parseInt(hex.substring(1, 3), 16);
+            const g = parseInt(hex.substring(3, 5), 16);
+            const b = parseInt(hex.substring(5, 7), 16);
+            const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b + 0; 
+            return luma < 120; 
+        }
+
+        /** Renders the specified screen content. */
+        function showScreen(name) {
+            if (gameState.screen === 'highScore' && name !== 'highScore' && scoreUnsubscribe) {
+                scoreUnsubscribe();
+                scoreUnsubscribe = null;
+                console.log("Unsubscribed from score updates.");
+            }
+            
+            gameState.screen = name;
+            const container = document.getElementById('screen-container');
+            container.innerHTML = screens[name];
+
+            if (name === 'options') {
+                updateOptionsUI();
+            } else if (name === 'highScore') {
+                loadScores();
+            } else if (name === 'game') {
+                // Game setup happens in startGame()
+            }
+        }
+
+        /** Updates the text/state of the Options toggles. */
+        function updateOptionsUI() {
+            const soundCheckbox = document.getElementById('toggle-sound-checkbox');
+            const musicCheckbox = document.getElementById('toggle-music-checkbox');
+            
+            if (soundCheckbox) {
+                soundCheckbox.checked = gameState.isSoundOn;
+            }
+            if (musicCheckbox) {
+                musicCheckbox.checked = gameState.isMusicOn;
+            }
+        }
+
+        /** Show modal with dynamic content. */
+        function showModal(type) {
+            const modalContainer = document.getElementById('modal-container');
+            const modalContent = document.getElementById('modal-content');
+            modalContainer.classList.remove('hidden');
+            modalContainer.classList.add('flex');
+
+            let contentHTML = '';
+            let useDefaultCloseButton = true;
+
+            switch (type) {
+                case 'howToPlay':
+                    contentHTML = `
+                        <h3 class="text-2xl font-bold text-indigo-400 mb-4">How To Play</h3>
+                        <p class="text-gray-300 mb-4">
+                            Your goal is to quickly match the color name displayed in the central "GET" window with the corresponding color button.
+                        </p>
+                        <p class="text-gray-300 mb-4">
+                            You must **click the button** or press the **matching keyboard key** (1 through 9) before the color name changes.
+                        </p>
+                        <ul class="list-disc list-inside text-gray-300 mb-4">
+                            <li>**Success:** You gain 1 point and the difficulty increases every 5 successful rounds.</li>
+                            <li>**Failure:** You lose 1 life.</li>
+                            <li>You start with **3 lives**. Lose them all and the game is over!</li>
+                        </ul>
+                        <p class="text-gray-400 text-sm">Keyboard Keys: 1=White, 2=Lime, 3=Violet, 4=Indigo, 5=Blue, 6=Green, 7=Yellow, 8=Orange, 9=Red.</p>
+                    `;
+                    break;
+                case 'about':
+                    contentHTML = `
+                        <h3 class="text-2xl font-bold text-indigo-400 mb-4">About MatchMind</h3>
+                        <p class="text-gray-300 mb-4">
+                            Developed by <strong> Ankush Shingari</strong> for the Color Match Challenge project.
+                        </p>
+                        <p class="text-gray-300">
+                            A game of speed, focus, and visual acuity. Enjoy the challenge!
+                        </p>
+                    `;
+                    break;
+                case 'gameOver':
+                    const score = gameState.score;
+                    const oldHighScore = gameState.userHighScores.highScore;
+                    const isNewHighScore = score > oldHighScore;
+                    
+                    let highScoreBanner = '';
+                    let message = `Try again to beat your high score of ${oldHighScore}!`;
+                    let scoreColor = 'text-white';
+
+                    if (isNewHighScore) {
+                        highScoreBanner = `
+                            <div class="bg-yellow-500 text-gray-900 font-black text-xl px-4 py-2 rounded-lg mb-4 transform -rotate-1 skew-y-2 shadow-lg">
+                                🎉 NEW HIGH SCORE! 🎉
+                            </div>
+                        `;
+                        message = `Congratulations! You set a **NEW high score**!`;
+                        scoreColor = 'text-yellow-400';
+                    }
+
+                    contentHTML = `
+                        <h3 class="text-3xl font-bold text-red-400 mb-4 text-center">GAME OVER!</h3>
+                        ${highScoreBanner}
+                        <p class="text-center text-gray-300 text-xl">Your final score is:</p>
+                        <p class="text-center text-5xl font-extrabold ${scoreColor} my-4">${score}</p>
+                        <p class="text-center text-sm text-gray-400">${message}</p>
+                    `;
+                    break;
+                case 'confirmReset':
+                    contentHTML = `
+                        <h3 class="text-2xl font-bold text-red-400 mb-4">Confirm Score Reset</h3>
+                        <p class="text-gray-300 mb-6">
+                            Are you sure you want to permanently erase all your high scores and average reaction times? **This action cannot be undone.**
+                        </p>
+                        <div class="flex justify-between space-x-4">
+                            <button class="px-6 py-3 bg-red-600 text-white font-bold rounded-lg shadow-xl transition-all duration-300 hover:bg-red-700 active:bg-red-800 w-full" onclick="window.performScoreReset()">Yes, Reset All</button>
+                            <button class="px-6 py-3 bg-gray-600 text-white font-bold rounded-lg shadow-xl transition-all duration-300 hover:bg-gray-700 active:bg-gray-800 w-full" onclick="window.closeModal()">No, Cancel</button>
+                        </div>
+                    `;
+                    useDefaultCloseButton = false; 
+                    break;
+            }
+
+            modalContent.innerHTML = contentHTML;
+
+            if (useDefaultCloseButton) {
+                modalContent.innerHTML += `<button class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-xl transition-all duration-300 hover:bg-indigo-700 hover:scale-[1.05] hover:shadow-2xl hover:shadow-indigo-500/50 active:bg-indigo-800 focus:outline-none focus:ring-4 focus:ring-indigo-500 w-full mt-6" onclick="window.closeModal()">Close</button>`;
+            }
+        }
+
+        /** Close the current modal. */
+        function closeModal() {
+            const modalContainer = document.getElementById('modal-container');
+            modalContainer.classList.add('hidden');
+            modalContainer.classList.remove('flex');
+
+            if (gameState.screen === 'gameover_modal') {
+                showScreen('mainMenu');
+            }
+        }
+
+        // --- Game Logic ---
+
+        /** Initializes the game state and starts the first round. */
+        function startGame() {
+            if (!isAuthReady) {
+                // Should only happen if initFirebase had a major error or was bypassed
+                console.warn("Authentication not ready. Game starting in in-memory mode.");
+            }
+
+            showScreen('game');
+            gameState.score = 0;
+            gameState.lives = 3;
+            gameState.currentDelay = gameState.baseDelay;
+            gameState.roundsSinceDifficultyIncrease = 0;
+            gameState.reactionTimes = [];
+            gameState.isInputLocked = false; 
+            gameState.isRoundResolved = false; 
+            
+            if (Tone.context.state !== 'running') {
+                Tone.start();
+            }
+            toggleMusic(gameState.isMusicOn); 
+
+            document.addEventListener('keydown', handleKeyDown);
+            nextRound();
+        }
+
+        /** Clears the game timer and removes event listeners. */
+        function stopGame() {
+            if (gameState.gameTimer) {
+                clearTimeout(gameState.gameTimer);
+                gameState.gameTimer = null;
+            }
+            gameState.isInputLocked = true; 
+            gameState.isRoundResolved = true; 
+            document.removeEventListener('keydown', handleKeyDown);
+        }
+
+        /** Starts the next round of the game. */
+        function nextRound() {
+            const gameScoreEl = document.getElementById('game-score');
+            if (!gameScoreEl) {
+                setTimeout(nextRound, 50); 
+                return;
+            }
+            
+            const gameLivesEl = document.getElementById('game-lives');
+            const feedbackMsgEl = document.getElementById('feedback-message');
+            const targetNameEl = document.getElementById('target-color-name');
+            const targetWindowEl = document.getElementById('get-color-window');
+
+            // 1. Reset input lock and round resolved flag
+            gameState.isInputLocked = false; 
+            gameState.isRoundResolved = false; 
+            
+            if (gameState.gameTimer) {
+                clearTimeout(gameState.gameTimer);
+            }
+
+            // 2. Update UI (Score, Lives, Difficulty)
+            gameScoreEl.textContent = gameState.score;
+            gameLivesEl.innerHTML = '❤️'.repeat(gameState.lives) + '💔'.repeat(3 - gameState.lives);
+            feedbackMsgEl.textContent = `Speed: ${gameState.currentDelay}ms`;
+            
+            // 3. Select new target color
+            let newColor;
+            do {
+                newColor = COLOR_MAP[Math.floor(Math.random() * COLOR_MAP.length)];
+            } while (gameState.currentRound && newColor.name === gameState.currentRound.name); 
+            gameState.currentRound = newColor;
+
+            // 4. Update Target Window
+            targetNameEl.textContent = gameState.currentRound.name;
+            targetNameEl.style.color = gameState.currentRound.hex; 
+
+            // Reset visual feedback
+            targetWindowEl.classList.remove('feedback-correct', 'feedback-miss');
+
+            // 5. Start timer for this round
+            gameState.roundStartTime = performance.now();
+            gameState.gameTimer = setTimeout(roundFailed, gameState.currentDelay);
+        }
+
+        /** Called when the player successfully matches the color. */
+        function handleCorrectMatch() {
+            playSound('correct');
+            const reactionTime = performance.now() - gameState.roundStartTime;
+
+            gameState.score += 1;
+            gameState.reactionTimes.push(reactionTime);
+
+            const targetWindow = document.getElementById('get-color-window');
+            targetWindow.classList.add('feedback-correct');
+            document.getElementById('feedback-message').textContent = `CORRECT! Reaction: ${reactionTime.toFixed(2)}ms`;
+
+            // Difficulty increase logic (after 5 successful gettings)
+            gameState.roundsSinceDifficultyIncrease++;
+            if (gameState.roundsSinceDifficultyIncrease >= 5) {
+                gameState.currentDelay = Math.max(200, gameState.currentDelay - 200); 
+                gameState.roundsSinceDifficultyIncrease = 0;
+                document.getElementById('feedback-message').textContent = `DIFFICULTY UP! New speed: ${gameState.currentDelay}ms`;
+            }
+
+            nextRound();
+        }
+
+        /** Called when the player clicks the wrong color. */
+        function handleWrongMatch() {
+            gameState.isInputLocked = true; 
+            
+            playSound('fail');
+            gameState.lives -= 1;
+
+            const targetWindow = document.getElementById('get-color-window');
+            targetWindow.classList.add('feedback-miss');
+            document.getElementById('feedback-message').textContent = `WRONG MATCH! ${gameState.lives} lives remaining.`;
+
+            if (gameState.lives <= 0) {
+                gameOver();
+            } else {
+                setTimeout(nextRound, 300);
+            }
+        }
+
+        /** Called when the player runs out of time. */
+        function roundFailed() {
+            if (gameState.isRoundResolved) {
+                return; 
+            }
+            
+            gameState.isRoundResolved = true; 
+
+            clearTimeout(gameState.gameTimer);
+            gameState.gameTimer = null;
+            
+            gameState.isInputLocked = true; 
+
+            gameState.lives -= 1;
+            playSound('fail');
+
+            const targetWindow = document.getElementById('get-color-window');
+            targetWindow.classList.add('feedback-miss');
+            document.getElementById('feedback-message').textContent = `TIMEOUT! ${gameState.lives} lives remaining.`;
+
+            if (gameState.lives <= 0) {
+                gameOver();
+            } else {
+                setTimeout(nextRound, 300);
+            }
+        }
+
+        /** Central check function for button click or keypress. */
+        function checkMatch(selectedColorName) {
+            if (gameState.isInputLocked || !gameState.gameTimer || gameState.isRoundResolved) return;
+            
+            gameState.isRoundResolved = true; 
+
+            clearTimeout(gameState.gameTimer);
+            gameState.gameTimer = null;
+
+            if (selectedColorName === gameState.currentRound.name) {
+                handleCorrectMatch();
+            } else {
+                handleWrongMatch();
+            }
+        }
+
+        /** Handles keyboard input for color matching. */
+        function handleKeyDown(event) {
+            if (gameState.screen !== 'game' || gameState.isInputLocked || gameState.isRoundResolved) return;
+            
+            const key = event.key;
+            const targetColor = COLOR_MAP.find(c => c.key === key);
+
+            if (targetColor) {
+                checkMatch(targetColor.name);
+            }
+        }
+
+        /** Ends the game and handles cleanup/score submission. */
+        function gameOver() {
+            stopGame();
+            playSound('gameover');
+            saveScores();
+            gameState.screen = 'gameover_modal';
+            showModal('gameOver');
+        }
+
+        // --- Firestore Management (V8 Methods) ---
+
+        /** Loads user high score and average reaction time from Firestore. */
+        async function loadScores() {
+            if (!isAuthReady || !userId || !db) {
+                const highScoreEl = document.getElementById('high-score-display');
+                const avgTimeEl = document.getElementById('avg-reaction-time-display');
+                if (highScoreEl) highScoreEl.textContent = 'DB Disabled';
+                if (avgTimeEl) avgTimeEl.textContent = 'No Save';
+                return;
+            }
+
+            if (scoreUnsubscribe) {
+                scoreUnsubscribe();
+            }
+
+            try {
+                const docRef = USER_STATS_REF(userId);
+                
+                // V8: docRef.onSnapshot()
+                scoreUnsubscribe = docRef.onSnapshot((docSnap) => {
+                    const data = docSnap.exists ? docSnap.data() : { highScore: 0, reactionTimes: [] };
+                    
+                    const high = data.highScore || 0;
+                    const times = data.reactionTimes || [];
+                    const avgTime = times.length > 0
+                        ? (times.reduce((a, b) => a + b, 0) / times.length).toFixed(2)
+                        : 0;
+                    
+                    gameState.userHighScores.highScore = high;
+                    gameState.userHighScores.averageReactionTime = avgTime;
+
+                    if (gameState.screen === 'highScore') {
+                        const highScoreEl = document.getElementById('high-score-display');
+                        const avgTimeEl = document.getElementById('avg-reaction-time-display');
+                        
+                        if (highScoreEl) {
+                            highScoreEl.textContent = high;
+                        }
+                        if (avgTimeEl) {
+                            avgTimeEl.textContent = `${avgTime} ms`;
+                        }
+                    }
+                }, (error) => {
+                    console.error("Error listening to Firestore scores:", error);
+                });
+
+            } catch (error) {
+                console.error("Error accessing Firestore to load scores:", error);
+                if (gameState.screen === 'highScore') {
+                    const highScoreEl = document.getElementById('high-score-display');
+                    const avgTimeEl = document.getElementById('avg-reaction-time-display');
+                    if (highScoreEl) highScoreEl.textContent = 'Error';
+                    if (avgTimeEl) avgTimeEl.textContent = 'Error';
+                }
+            }
+        }
+
+        /** Saves the current game score and updates average reaction time. */
+        async function saveScores() {
+            if (!isAuthReady || !userId || !db) return;
+
+            const docRef = USER_STATS_REF(userId);
+            
+            const isNewHighScore = gameState.score > gameState.userHighScores.highScore;
+
+            try {
+                // V8: docRef.get()
+                const docSnap = await docRef.get();
+                const currentData = docSnap.exists ? docSnap.data() : { highScore: 0, reactionTimes: [] };
+
+                let updatedReactionTimes = currentData.reactionTimes.concat(gameState.reactionTimes);
+                
+                if (updatedReactionTimes.length > 100) {
+                    updatedReactionTimes = updatedReactionTimes.slice(updatedReactionTimes.length - 100);
+                }
+
+                const updateData = {
+                    highScore: isNewHighScore ? gameState.score : currentData.highScore,
+                    reactionTimes: updatedReactionTimes
+                };
+
+                // V8: docRef.set()
+                await docRef.set(updateData, { merge: true });
+                console.log("Score and Reaction times saved/updated successfully.");
+
+            } catch (error) {
+                console.error("Error saving score to Firestore:", error);
+            }
+        }
+
+        /** Performs the actual score reset after user confirmation. */
+        async function performScoreReset() {
+             if (!isAuthReady || !userId || !db) {
+                 window.closeModal();
+                 return;
+             }
+
+             const docRef = USER_STATS_REF(userId);
+             try {
+                // V8: docRef.set()
+                await docRef.set({ highScore: 0, reactionTimes: [] }, { merge: false });
+                console.log("Scores reset successfully.");
+
+                window.closeModal();
+                if (gameState.screen === 'highScore') {
+                    loadScores(); 
+                }
+             } catch (error) {
+                 console.error("Error resetting scores:", error);
+                 window.closeModal();
+             }
+        }
+        
+        /** Shows the confirmation modal before calling the reset function. */
+        function resetScores() {
+            if (!db) {
+                showModal('about'); 
+                document.getElementById('modal-content').querySelector('h3').textContent = "Database Disabled";
+                document.getElementById('modal-content').querySelector('p').textContent = "You are currently running in a mode where scores cannot be saved or reset.";
+                return;
+            }
+            window.showModal('confirmReset');
+        }
+
+
+        // --- Startup and Shutter Sequence ---
+
+        window.onload = async function() {
+            // 1. Initialize Firebase and authenticate
+            document.getElementById('loading-indicator').textContent = 'Connecting...';
+            await initFirebase();
+            document.getElementById('loading-indicator').textContent = 'Ready.';
+
+            // 2. Initialize Tone.js properties now that objects are guaranteed to be fully defined
+            initializeToneProperties();
+
+            // 3. Animate logo
+            const splashLogo = document.getElementById('splash-logo');
+            const logoHeader = document.getElementById('logo-header');
+            
+            setTimeout(() => {
+                splashLogo.style.position = 'absolute';
+                splashLogo.style.top = '4px';
+                splashLogo.style.left = '4px';
+                splashLogo.style.opacity = '0'; 
+                
+                logoHeader.style.opacity = '1'; 
+
+                // 4. Open the shutter
+                const topShutter = document.getElementById('shutter-top');
+                const bottomShutter = document.getElementById('shutter-bottom');
+
+                topShutter.classList.add('shutter-open');
+                bottomShutter.classList.add('shutter-open');
+                
+                // 5. Show Main Menu after shutter closes
+                setTimeout(() => {
+                    document.getElementById('splash-screen').style.display = 'none';
+                    showScreen('mainMenu');
+                }, 1000); 
+            }, 1000); 
+        };
+
+        // --- Expose global functions for HTML access ---
+        window.startGame = startGame;
+        window.stopGame = stopGame;
+        window.showScreen = showScreen;
+        window.showModal = showModal;
+        window.closeModal = closeModal;
+        window.checkMatch = checkMatch;
+        window.toggleSound = toggleSound;
+        window.toggleMusic = toggleMusic;
+        window.resetScores = resetScores; 
+        window.performScoreReset = performScoreReset; 
+
+        window.simulatedExit = () => {
+            document.getElementById('screen-container').innerHTML = `
+                <div class="p-8 text-center text-white">
+                    <h2 class="text-3xl font-bold text-indigo-400 mb-4">Exiting Game...</h2>
+                    <p>Thank you for playing MatchMind!</p>
+                    <button class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-xl transition-all duration-300 hover:bg-indigo-700 hover:scale-[1.05] hover:shadow-2xl hover:shadow-indigo-500/50 active:bg-indigo-800 focus:outline-none focus:ring-4 focus:ring-indigo-500 mt-6" onclick="window.location.reload()">Restart App</button>
+                </div>
+            `;
+        };
+
+    </script>
+</body>
+</html>
